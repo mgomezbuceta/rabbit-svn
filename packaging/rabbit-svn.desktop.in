@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RabbitSVN
+Comment=Cliente gráfico de Subversion
+Exec=@DIR@/run.sh %f
+Icon=@DIR@/packaging/rabbit-svn.svg
+Terminal=false
+Categories=Development;RevisionControl;
+MimeType=inode/directory;
+StartupWMClass=rabbit-svn

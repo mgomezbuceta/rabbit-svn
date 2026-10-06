@@ -1,0 +1,5 @@
+# Versiones fijadas (probadas). Actualizar de forma consciente y volver a ejecutar los tests.
+PySide6==6.11.2
+keyring==25.7.0
+SecretStorage==3.5.0
+jeepney==0.9.0
