@@ -11,6 +11,7 @@
 [![Subversion](https://img.shields.io/badge/Subversion-1.10%2B-809CC9?logo=subversion&logoColor=white)](https://subversion.apache.org/)
 [![Plataforma](https://img.shields.io/badge/Linux-escritorio-2fbf86?logo=linux&logoColor=white)](#-instalación)
 [![Licencia](https://img.shields.io/badge/licencia-Apache%202.0-blue)](LICENSE)
+[![Última versión](https://img.shields.io/github/v/release/mgomezbuceta/rabbit-svn?label=versi%C3%B3n&color=2fbf86)](https://github.com/mgomezbuceta/rabbit-svn/releases/latest)
 
 <img src="capturas/principal.png" alt="Ventana principal con el estado de la working copy" width="860">
 
@@ -63,18 +64,34 @@ RabbitSVN no guarda copia de tus datos: todo lo que ves sale de tu working copy 
 
 ## 📦 Instalación
 
-### Requisitos
+### Versiones disponibles
+
+| Sistema | Formato | Notas |
+|---|---|---|
+| 🐧 **Ubuntu 22.04+ / Debian 12+** (x86_64) | `rabbit-svn_<versión>_amd64.deb` | Incluye su propia copia de PySide6. Instala Subversion y el resto de dependencias, y añade la app al menú. |
+| 🛠️ **Código fuente** | `./install.sh` | Cualquier Linux con Python 3.10+. Ideal para desarrollar. |
+
+**[⬇️ Descarga la última versión](https://github.com/mgomezbuceta/rabbit-svn/releases/latest)** desde *Releases*. Cada versión incluye `SHA256SUMS.txt` para comprobar la descarga.
+
+### 🐧 Paquete .deb (recomendado)
+
+```bash
+sha256sum -c SHA256SUMS.txt                      # opcional: comprobar la descarga
+sudo apt install ./rabbit-svn_0.1.0_amd64.deb
+```
+
+`apt` instala también `subversion` y el resto de dependencias. Después búscala en el menú de aplicaciones como **RabbitSVN**, o escribe `rabbit-svn` en una terminal.
+
+- **Actualizar**: instala el `.deb` nuevo encima. Tu configuración y tus proyectos se conservan.
+- **Desinstalar**: `sudo apt remove rabbit-svn`. Tus proyectos y ajustes de `~/.config/rabbit-svn` no se borran.
+
+### 🛠️ Desde el código fuente
 
 | | Versión | En Ubuntu / Debian |
 |---|---|---|
-| 🐧 **Linux** con escritorio | X11 o Wayland | — |
 | 🐍 **Python** | 3.10 o superior, con `venv` | `sudo apt install python3 python3-venv` |
 | 📦 **Subversion** | 1.10 o superior | `sudo apt install subversion` |
 | 🔍 **meld** *(opcional)* | cualquiera | `sudo apt install meld` |
-
-Probado en **Ubuntu 24.04** con Subversion 1.14 y Python 3.12.
-
-### Instalar
 
 ```bash
 git clone https://github.com/mgomezbuceta/rabbit-svn.git
@@ -90,6 +107,11 @@ cd rabbit-svn
 
 Para usar otro intérprete: `PYTHON=/ruta/a/python3 ./install.sh`.
 
+- **Actualizar**: `git pull && ./install.sh`.
+- **Desinstalar**: `rm ~/.local/bin/rabbit-svn ~/.local/share/applications/rabbit-svn.desktop` y borra la carpeta clonada.
+
+> No instales a la vez el `.deb` y la versión del código fuente: los dos crean el comando `rabbit-svn`.
+
 ### Arrancar
 
 ```bash
@@ -97,26 +119,7 @@ rabbit-svn                       # abre el último proyecto usado
 rabbit-svn ~/proyectos/mi-wc     # abre (o propone añadir) esa working copy
 ```
 
-O búscalo en el menú de aplicaciones como **RabbitSVN**.
-
-### Actualizar
-
-```bash
-cd rabbit-svn
-git pull
-./install.sh
-```
-
-Tu configuración y tus proyectos se conservan.
-
-### Desinstalar
-
-```bash
-rm ~/.local/bin/rabbit-svn ~/.local/share/applications/rabbit-svn.desktop
-rm -rf ~/.config/rabbit-svn          # opcional: borra proyectos y ajustes
-```
-
-Después borra la carpeta del repositorio clonado.
+O búscalo en el menú de aplicaciones como **RabbitSVN**. Probado en **Ubuntu 24.04** con Subversion 1.14 y Python 3.12.
 
 > **¿No se abre?** Si lo lanzas desde el menú, los errores de arranque quedan en `~/.config/rabbit-svn/arranque.log`. Lánzalo desde una terminal con `rabbit-svn` para verlos directamente.
 
@@ -223,7 +226,10 @@ Casi todo está también en el **menú contextual** de cada fichero o carpeta, q
 .venv/bin/pip install pytest
 .venv/bin/python -m pytest tests          # tests del cliente svn y de seguridad
 .venv/bin/python scripts/capturas.py      # regenera las capturas con un repositorio de demostración
+packaging/build-deb.sh                    # genera instaladores/rabbit-svn_<versión>_amd64.deb y SHA256SUMS.txt
 ```
+
+`build-deb.sh` no necesita root (usa `fakeroot`). Descarga la rueda de PySide6-Essentials de la versión fijada en `requirements.txt`, elimina lo que la app no usa (Qt Quick, QML, Designer, herramientas…) y deja el paquete en unos 23 MB. La versión sale de `rabbitsvn/__init__.py`.
 
 ### Ramas
 
@@ -235,7 +241,7 @@ Casi todo está también en el **menú contextual** de cada fichero o carpeta, q
 rabbitsvn/svn/   cliente de Subversion (órdenes, validación y lectura del XML)
 rabbitsvn/ui/    ventana principal y diálogos (PySide6)
 rabbitsvn/config.py  configuración, proyectos y llavero
-packaging/       entrada de menú e icono
+packaging/       icono, entrada de menú y generación del .deb
 scripts/         utilidades (capturas del README)
 tests/           tests contra repositorios file:// temporales
 ```
