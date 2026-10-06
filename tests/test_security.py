@@ -50,10 +50,12 @@ def test_rutas_tras_separador():
 
 def test_contrasena_no_en_argv():
     from rabbitsvn.svn.client import Credentials
-    c = SvnClient(Credentials(username="u", password="S3cr3t!"))
+    import secrets
+    clave = secrets.token_urlsafe(16)  # valor aleatorio: el test no contiene ninguna credencial
+    c = SvnClient(Credentials(username="u", password=clave))
     cmd = c.cmd_update(["/tmp/wc"])
-    assert "S3cr3t!" not in " ".join(cmd.argv)
-    assert "--password-from-stdin" in cmd.argv and cmd.stdin == "S3cr3t!\n"
+    assert clave not in " ".join(cmd.argv)
+    assert "--password-from-stdin" in cmd.argv and cmd.stdin == clave + "\n"
 
 
 def test_mensaje_no_en_argv():

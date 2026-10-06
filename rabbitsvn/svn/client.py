@@ -24,7 +24,9 @@ TRUST_FAILURES = ["unknown-ca", "cn-mismatch", "expired", "not-yet-valid", "othe
 
 # Autorización fallida / sin más credenciales. (E170013 es "no se puede conectar":
 # acompaña a muchos errores de red y NO implica credenciales incorrectas.)
-AUTH_ERROR_CODES = ("E170001", "E215004")
+ERR_AUTHZ_FAILED = "E170001"         # svn: autorización fallida
+ERR_NO_MORE_CREDENTIALS = "E215004"  # svn: no quedan credenciales que probar
+AUTH_ERROR_CODES = (ERR_AUTHZ_FAILED, ERR_NO_MORE_CREDENTIALS)
 
 ALLOWED_SCHEMES = ("file", "svn", "svn+ssh", "http", "https")
 _REV_RE = re.compile(r"^(HEAD|BASE|COMMITTED|PREV|\d+|\{\d{4}-\d{2}-\d{2}( \d{1,2}:\d{2}(:\d{2})?)?\})$")
