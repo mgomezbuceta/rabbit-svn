@@ -18,6 +18,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Optional
+from urllib.parse import urlsplit
 
 from .svn.client import TRUST_FAILURES, Credentials, SvnClient, strip_url_credentials
 
@@ -81,10 +82,11 @@ DEFAULTS = {
         "only_changes": False,
     },
     "projects": [],
+    "accounts": [],
 }
 
 # Secciones que pueden modificar varias instancias a la vez: se fusionan desde disco al guardar.
-SHARED_KEYS = (("projects", None), ("cache", "recent_urls"), ("cache", "recent_messages"))
+SHARED_KEYS = (("projects", None), ("accounts", None), ("cache", "recent_urls"), ("cache", "recent_messages"))
 
 
 @dataclass
@@ -93,12 +95,13 @@ class Project:
     wc_path: str = ""
     url: str = ""
     repo_root: str = ""
-    username: str = ""
+    username: str = ""            # obsoleto desde 0.3.0: se usa la credencial (account_id)
     remember_password: bool = False
     trust_failures: list = field(default_factory=list)
     no_auth_cache: bool = True
     notes: str = ""
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    account_id: str = ""
 
     @classmethod
     def from_dict(cls, d) -> Optional["Project"]:
@@ -119,6 +122,51 @@ class Project:
         if not kwargs["name"]:
             kwargs["name"] = os.path.basename(kwargs["wc_path"].rstrip("/")) or "(sin nombre)"
         return cls(**kwargs)
+
+
+def server_of(url: str) -> str:
+    """'https://Host:8443/repo/trunk' → 'https://host:8443'. '' si no hay servidor (file://)."""
+    try:
+        parts = urlsplit((url or "").strip())
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return ""
+    if not host or parts.scheme.lower() not in ("svn", "svn+ssh", "http", "https"):
+        return ""
+    default = {"http": 80, "https": 443, "svn": 3690, "svn+ssh": 22}.get(parts.scheme.lower())
+    netloc = host if port in (None, default) else f"{host}:{port}"
+    if ":" in host and not host.startswith("["):   # IPv6
+        netloc = f"[{host}]" + (f":{port}" if port not in (None, default) else "")
+    return f"{parts.scheme.lower()}://{netloc}"
+
+
+@dataclass
+class Account:
+    """Credencial guardada para un servidor; la comparten todos sus proyectos."""
+    server: str
+    username: str
+    remember_password: bool = True
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    @property
+    def key(self) -> str:
+        return f"account:{self.id}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.username} @ {self.server.split('://', 1)[-1]}"
+
+    @classmethod
+    def from_dict(cls, d) -> Optional["Account"]:
+        if not isinstance(d, dict):
+            return None
+        server, user, acc_id = d.get("server"), d.get("username"), d.get("id")
+        if not (isinstance(server, str) and server and isinstance(user, str) and user
+                and isinstance(acc_id, str) and acc_id.isalnum()):
+            return None
+        return cls(server=server, username=user, remember_password=d.get("remember_password") is not False,
+                   id=acc_id)
 
 
 # --------------------------------------------------------------- contraseñas
@@ -268,6 +316,11 @@ class Config:
                     projects = [Project.from_dict(p) for p in value]
                     self.data["projects"] = [asdict(p) for p in projects if p]
                 continue
+            if section == "accounts":
+                if isinstance(value, list):
+                    accounts = [Account.from_dict(a) for a in value]
+                    self.data["accounts"] = [asdict(a) for a in accounts if a]
+                continue
             if not isinstance(value, dict):
                 continue
             for key, default in defaults.items():
@@ -362,6 +415,99 @@ class Config:
             "projects", [p for p in data.get("projects", []) if p.get("id") != project_id]))
         self.passwords.delete(project_id)
 
+    # ---- credenciales por servidor
+    @property
+    def accounts(self) -> list:
+        return [a for a in (Account.from_dict(d) for d in self.data.get("accounts", [])) if a]
+
+    def account(self, account_id: str) -> Optional[Account]:
+        for a in self.accounts:
+            if a.id == account_id:
+                return a
+        return None
+
+    def accounts_for_server(self, server: str) -> list:
+        """Solo credenciales del MISMO servidor (esquema, host y puerto): nunca se ofrecen las de otro."""
+        return [a for a in self.accounts if server and a.server == server]
+
+    def find_account(self, server: str, username: str) -> Optional[Account]:
+        for a in self.accounts_for_server(server):
+            if a.username == username:
+                return a
+        return None
+
+    def projects_using(self, account_id: str) -> list:
+        return [p for p in self.projects if p.account_id == account_id]
+
+    def save_account(self, account: Account, password: Optional[str] = None):
+        """Guarda la credencial. password=None conserva la contraseña actual."""
+        def fn(data):
+            items = data.setdefault("accounts", [])
+            for i, a in enumerate(items):
+                if a.get("id") == account.id:
+                    items[i] = asdict(account)
+                    break
+            else:
+                items.append(asdict(account))
+        self._mutate(fn)
+        if password is not None:
+            self.passwords.set(account.key, password, account.remember_password)
+        elif not account.remember_password:
+            self.passwords.delete(account.key, session=False)
+
+    def get_or_create_account(self, server: str, username: str, remember: bool) -> Account:
+        acc = self.find_account(server, username)
+        if acc is None:
+            acc = Account(server=server, username=username, remember_password=remember)
+            self.save_account(acc)
+        return acc
+
+    def remove_account(self, account_id: str):
+        """Borra la credencial y la desvincula de los proyectos que la usaban."""
+        def fn(data):
+            data["accounts"] = [a for a in data.get("accounts", []) if a.get("id") != account_id]
+            for p in data.get("projects", []):
+                if p.get("account_id") == account_id:
+                    p["account_id"] = ""
+                    p["username"] = ""
+        self._mutate(fn)
+        self.passwords.delete(f"account:{account_id}")
+
+    def migrate_credentials(self) -> list:
+        """Pasa las credenciales por proyecto (≤0.2) a credenciales por servidor.
+
+        Agrupa por (servidor, usuario). Si las contraseñas guardadas coinciden (o solo hay una),
+        crea la credencial y mueve la contraseña. Si difieren, crea la credencial SIN contraseña y
+        devuelve el conflicto para que la interfaz pregunte cuál es la válida.
+        Devuelve [(Account, [nombres de proyecto])] de los conflictos.
+        """
+        groups: dict = {}
+        for p in self.projects:
+            if p.account_id or not p.username:
+                continue
+            server = server_of(p.url or p.repo_root)
+            if not server:
+                continue
+            groups.setdefault((server, p.username), []).append(p)
+        conflicts = []
+        for (server, user), projs in groups.items():
+            stored = {p.id: self.passwords.get(p.id) for p in projs}
+            distinct = {pw for pw in stored.values() if pw}
+            acc = self.find_account(server, user) or Account(
+                server=server, username=user, remember_password=any(p.remember_password for p in projs))
+            if len(distinct) <= 1:
+                self.save_account(acc, next(iter(distinct)) if distinct else None)
+            else:
+                self.save_account(acc)
+                conflicts.append((acc, [p.name for p in projs]))
+            for p in projs:
+                p.account_id = acc.id
+                self.save_project(p)
+            if len(distinct) <= 1:   # contraseña ya copiada a la credencial: se borran las antiguas
+                for p in projs:
+                    self.passwords.delete(p.id)
+        return conflicts
+
     def project_for_path(self, path: str) -> Optional[Project]:
         path = os.path.realpath(path)
         best = None
@@ -400,9 +546,14 @@ class Config:
     def client(self, project: Optional[Project] = None, password: Optional[str] = None) -> SvnClient:
         creds = Credentials()
         if project:
-            creds.username = project.username
-            if project.username:
-                creds.password = password if password is not None else self.passwords.get(project.id)
+            acc = self.account(project.account_id) if project.account_id else None
+            if acc:
+                creds.username = acc.username
+                creds.password = password if password is not None else self.passwords.get(acc.key)
+            else:   # proyecto sin credencial o configuración antigua
+                creds.username = project.username
+                if project.username:
+                    creds.password = password if password is not None else self.passwords.get(project.id)
             creds.trust_failures = [t for t in project.trust_failures if t in TRUST_FAILURES]
             creds.no_auth_cache = project.no_auth_cache
         timeout = int(self.get("svn", "timeout", 0) or 0) or None

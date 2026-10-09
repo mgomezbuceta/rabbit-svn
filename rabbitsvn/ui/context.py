@@ -7,7 +7,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFormLayout, QLabel, QLineEdit, QVBoxLayout)
 
-from ..config import APP_NAME, Config, Project
+from ..config import APP_NAME, Account, Config, Project, server_of
 from ..svn.client import SvnClient, SvnError
 from .common import run_async, show_error, std_buttons
 
@@ -42,7 +42,8 @@ class CommandLog(QObject):
 
 
 class LoginDialog(QDialog):
-    def __init__(self, parent, project: Optional[Project], reason: str = "", can_persist: bool = True):
+    def __init__(self, parent, project: Optional[Project], reason: str = "", can_persist: bool = True,
+                 account=None):
         super().__init__(parent)
         self.setWindowTitle("Autenticación SVN")
         lay = QVBoxLayout(self)
@@ -53,7 +54,7 @@ class LoginDialog(QDialog):
             lbl.setStyleSheet("color:#c62828")
             lay.addWidget(lbl)
         form = QFormLayout()
-        self.user = QLineEdit(project.username if project else "")
+        self.user = QLineEdit(account.username if account else (project.username if project else ""))
         self.pwd = QLineEdit()
         self.pwd.setEchoMode(QLineEdit.Password)
         form.addRow("Usuario:", self.user)
@@ -61,8 +62,15 @@ class LoginDialog(QDialog):
         lay.addLayout(form)
         self.remember = QCheckBox("Guardar en el llavero del sistema" if can_persist
                                   else "Recordar durante esta sesión")
-        self.remember.setChecked(bool(project and project.remember_password))
+        self.remember.setChecked(account.remember_password if account
+                                 else bool(project and project.remember_password))
         lay.addWidget(self.remember)
+        if account:
+            note = QLabel(f"La contraseña se actualizará en todos los proyectos de {account.server}.")
+            note.setTextFormat(Qt.PlainText)
+            note.setWordWrap(True)
+            note.setStyleSheet("color:gray")
+            lay.addWidget(note)
         lay.addWidget(std_buttons(self, "Conectar"))
         (self.pwd if self.user.text() else self.user).setFocus()
 
@@ -91,18 +99,32 @@ class Context:
         return Context(self.config, project)
 
     def ask_credentials(self, parent, reason: str = "") -> bool:
-        dlg = LoginDialog(parent, self.project, reason, self.config.passwords.persistent)
+        acc = self.config.account(self.project.account_id) if self.project and self.project.account_id else None
+        dlg = LoginDialog(parent, self.project, reason, self.config.passwords.persistent, acc)
         if dlg.exec() != QDialog.Accepted:
             return False
-        user, pwd = dlg.user.text().strip(), dlg.pwd.text()
+        user, pwd, remember = dlg.user.text().strip(), dlg.pwd.text(), dlg.remember.isChecked()
         if self.password_override is not None:   # proyecto aún sin guardar
+            if acc is None or acc.username != user:
+                self.project.account_id = ""
             self.project.username = user
             self.password_override = pwd
             return True
         if self.project:
-            self.project.username = user
-            self.project.remember_password = dlg.remember.isChecked()
-            self.config.passwords.set(self.project.id, pwd, dlg.remember.isChecked())
+            server = server_of(self.project.url or self.project.repo_root)
+            if server and user:
+                # Credencial compartida por servidor: se crea o se actualiza la de ese usuario
+                account = self.config.find_account(server, user) or Account(server=server, username=user)
+                account.remember_password = remember
+                self.config.save_account(account, pwd)
+                self.project.account_id = account.id
+                self.project.username = user
+                self.config.passwords.delete(self.project.id)   # restos del formato antiguo
+            else:   # file:// o sin usuario: se guarda en el propio proyecto
+                self.project.account_id = ""
+                self.project.username = user
+                self.project.remember_password = remember
+                self.config.passwords.set(self.project.id, pwd, remember)
             if self.config.project(self.project.id):
                 self.config.save_project(self.project)
         else:

@@ -5,15 +5,17 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout,
+                               QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
                                QRadioButton, QStackedWidget, QVBoxLayout, QWidget)
 
-from ..config import Config, Project
+from ..config import Account, Config, Project, server_of
 from ..svn.client import TRUST_FAILURES, SvnError, ValidationError, validate_url
 from .action import ActionDialog
 from .common import DEPTHS, PathEdit, RevisionWidget, UrlCombo, combo_from, esc, fmt_date, show_error, std_buttons
 from .context import Context, run_svn
+
+NONE, NEW = "__none__", "__new__"
 
 TRUST_LABELS = {
     "unknown-ca": "Autoridad de certificación desconocida (autofirmado)",
@@ -65,11 +67,21 @@ class ProjectDialog(QDialog):
         # ---- conexión
         conn = QGroupBox("Conexión y credenciales")
         cf = QFormLayout(conn)
-        self.username = QLineEdit(self.project.username)
-        self.username.setPlaceholderText("Vacío = anónimo o credenciales en caché de svn")
+        self.server = server_of(self.project.url or self.project.repo_root)
+        self._asked_servers: set = set()
+        self.cred = QComboBox()
+        self.cred.currentIndexChanged.connect(self._cred_changed)
+        cf.addRow("Credenciales:", self.cred)
+        self.cred_info = QLabel("")
+        self.cred_info.setWordWrap(True)
+        self.cred_info.setStyleSheet("color:gray")
+        cf.addRow("", self.cred_info)
+        # Campos para un usuario nuevo
+        self.username = QLineEdit(self.project.username if not self.project.account_id else "")
         cf.addRow("Usuario:", self.username)
         # La contraseña guardada no se vuelca al formulario: vacío = mantener la actual
-        self._stored_pwd = config.passwords.get(self.project.id) if self.editing else ""
+        self._stored_pwd = (config.passwords.get(self.project.id)
+                            if self.editing and not self.project.account_id else "")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
         if self._stored_pwd:
@@ -78,8 +90,10 @@ class ProjectDialog(QDialog):
         store = ("Guardar contraseña en el llavero del sistema" if config.passwords.persistent
                  else "Recordar contraseña (solo esta sesión: no hay llavero disponible)")
         self.remember = QCheckBox(store)
-        self.remember.setChecked(self.project.remember_password)
+        self.remember.setChecked(self.project.remember_password or not self.editing)
         cf.addRow("", self.remember)
+        self._new_rows = [self.username, self.password, self.remember]
+        self._cred_form = cf
         self.no_auth_cache = QCheckBox("No guardar credenciales en la caché de svn (--no-auth-cache)")
         self.no_auth_cache.setChecked(self.project.no_auth_cache)
         cf.addRow("", self.no_auth_cache)
@@ -105,6 +119,8 @@ class ProjectDialog(QDialog):
         lay.addWidget(self.notes)
         lay.addWidget(std_buttons(self, "Guardar" if self.editing else "Añadir"))
 
+        default = self.project.account_id or (NEW if self.project.username else NONE)
+        self._fill_credentials(select=default)
         if initial_path:
             self.local_path.setText(initial_path)
             self._read_local()
@@ -133,6 +149,9 @@ class ProjectDialog(QDialog):
         self.dest = PathEdit("dir", os.path.expanduser("~/"))
         f.addRow("Carpeta destino:", self.dest)
         self.url.currentTextChanged.connect(self._suggest_dest)
+        self.url.currentTextChanged.connect(lambda t: self._set_server(server_of(t), ask=False))
+        self.url.lineEdit().editingFinished.connect(lambda: self._set_server(server_of(self.url.text()), ask=True))
+        self.url.activated.connect(lambda _i: self._set_server(server_of(self.url.text()), ask=True))
         self.revision = RevisionWidget()
         f.addRow("Revisión:", self.revision)
         self.depth = combo_from(DEPTHS, "infinity")
@@ -160,6 +179,78 @@ class ProjectDialog(QDialog):
         if not self.name.text():
             self.name.setPlaceholderText(name)
 
+    # -------------------------------------------------------------- credenciales
+    def _fill_credentials(self, select=None):
+        current = select if select is not None else self.cred.currentData()
+        self.cred.blockSignals(True)
+        self.cred.clear()
+        self.cred.addItem("Sin credenciales (anónimo o caché de svn)", NONE)
+        for acc in self.config.accounts_for_server(self.server):
+            has_pwd = bool(self.config.passwords.get(acc.key))
+            self.cred.addItem(f"{acc.username}  ({'contraseña guardada' if has_pwd else 'sin contraseña guardada'})",
+                              acc.id)
+        self.cred.addItem("Otro usuario…", NEW)
+        idx = self.cred.findData(current)
+        self.cred.setCurrentIndex(idx if idx >= 0 else self.cred.findData(NEW if self.username.text() else NONE))
+        self.cred.blockSignals(False)
+        self._cred_changed()
+
+    def _cred_changed(self, *_):
+        data = self.cred.currentData()
+        new = data == NEW
+        for w in self._new_rows:
+            w.setVisible(new)
+            lbl = self._cred_form.labelForField(w)
+            if lbl:
+                lbl.setVisible(new)
+        acc = self.config.account(data) if data not in (NEW, NONE) else None
+        if acc:
+            n = len(self.config.projects_using(data))
+            self.cred_info.setText(f"Credencial compartida de {acc.server}" +
+                                   (f", la usan {n} proyecto(s)." if n else ".") +
+                                   " Si cambias la contraseña, cambia para todos.")
+        elif new:
+            self.cred_info.setText(f"Se guardará como credencial de {self.server} para reutilizarla en otros "
+                                   "proyectos de ese servidor." if self.server else
+                                   "Indica el usuario y la contraseña del repositorio.")
+        else:
+            self.cred_info.setText("svn usará el acceso anónimo o las credenciales que tenga en su propia caché.")
+
+    def _set_server(self, server: str, ask: bool):
+        if server != self.server:
+            self.server = server
+            self._fill_credentials()
+        if ask:
+            self._offer_saved(server)
+
+    def _offer_saved(self, server: str):
+        """Si hay credenciales guardadas para este servidor, pregunta si usar una (solo al añadir)."""
+        if self.editing or not server or server in self._asked_servers or self.cred.currentData() not in (NEW, NONE):
+            return
+        accounts = self.config.accounts_for_server(server)
+        if not accounts:
+            return
+        self._asked_servers.add(server)
+        host = server.split("://", 1)[-1]
+        other = "Otro usuario (introducirlo a mano)"
+        if len(accounts) == 1:
+            ans = QMessageBox.question(self, "Credenciales guardadas",
+                                       f"Ya tienes guardado el usuario «{accounts[0].username}» para {host}.\n"
+                                       "¿Quieres usarlo para este proyecto?",
+                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            choice = accounts[0] if ans == QMessageBox.Yes else None
+        else:
+            labels = [a.username for a in accounts] + [other]
+            item, ok = QInputDialog.getItem(self, "Credenciales guardadas",
+                                            f"Ya tienes credenciales guardadas para {host}.\n¿Cuál quieres usar?",
+                                            labels, 0, False)
+            choice = accounts[labels.index(item)] if ok and item != other else None
+        if choice:
+            self.cred.setCurrentIndex(self.cred.findData(choice.id))
+        else:
+            self.cred.setCurrentIndex(self.cred.findData(NEW))
+            self.username.setFocus()
+
     def _info_text(self, url, root, rev, author, date):
         parts = [f"<b>URL:</b> {esc(url)}", f"<b>Raíz del repositorio:</b> {esc(root)}"]
         if rev is not None:
@@ -175,16 +266,25 @@ class ProjectDialog(QDialog):
 
     # -------------------------------------------------------------- acciones
     def _temp_project(self) -> Project:
-        p = Project(name=self.name.text().strip(), username=self.username.text().strip(),
+        data = self.cred.currentData()
+        p = Project(name=self.name.text().strip(),
                     trust_failures=[k for k, cb in self.trust.items() if cb.isChecked()],
-                    no_auth_cache=self.no_auth_cache.isChecked(), id=self.project.id)
+                    no_auth_cache=self.no_auth_cache.isChecked(), id=self.project.id,
+                    url=self.url.text() if self.r_remote.isChecked() else self.project.url,
+                    repo_root=self.project.repo_root)
+        if data == NEW:
+            p.username = self.username.text().strip()
+        elif data != NONE:
+            acc = self.config.account(data)
+            p.account_id, p.username = (acc.id, acc.username) if acc else ("", "")
         return p
 
     def _ctx(self) -> Context:
         """Contexto con la contraseña del formulario, sin guardarla en ningún sitio todavía.
         Si el servidor la rechaza, LoginDialog la sustituye dentro de este contexto."""
-        self._last_ctx = Context(self.config, self._temp_project(),
-                                 password_override=self.password.text() or self._stored_pwd)
+        tmp = self._temp_project()
+        override = None if tmp.account_id else (self.password.text() or self._stored_pwd)
+        self._last_ctx = Context(self.config, tmp, password_override=override)
         return self._last_ctx
 
     def _read_local(self):
@@ -202,6 +302,7 @@ class ProjectDialog(QDialog):
                                                     i.last_changed_author, i.last_changed_date))
             if not self.name.text():
                 self.name.setText(os.path.basename(os.path.normpath(i.wc_root or path)))
+            self._set_server(server_of(i.url), ask=True)
 
         def err(exc):
             self.info_label.setText(self._err_html("No es una working copy válida: ", exc))
@@ -219,6 +320,7 @@ class ProjectDialog(QDialog):
         url = self.url.text()
         if not url or not self._valid_url(url):
             return
+        self._set_server(server_of(url), ask=True)
         self.remote_label.setText("Conectando…")
 
         def done(infos):
@@ -245,18 +347,34 @@ class ProjectDialog(QDialog):
         p = self.project
         tmp = ctx.project if ctx else self._temp_project()   # el usuario puede venir del LoginDialog
         p.name = self.name.text().strip() or os.path.basename(os.path.normpath(wc_path))
-        p.username, p.trust_failures, p.no_auth_cache = tmp.username, tmp.trust_failures, tmp.no_auth_cache
-        p.remember_password = self.remember.isChecked()
+        p.trust_failures, p.no_auth_cache = tmp.trust_failures, tmp.no_auth_cache
         p.notes = self.notes.toPlainText()
         p.wc_path = os.path.normpath(wc_path)
         p.url = url or p.url
-        pwd = (ctx.password_override if ctx and ctx.password_override is not None
-               else self.password.text() or self._stored_pwd)
-        self.config.save_project(p)
-        if p.username and pwd:
-            self.config.passwords.set(p.id, pwd, p.remember_password)
-        elif not p.username:
+        server = server_of(p.url or p.repo_root)
+        pwd = ctx.password_override if ctx and ctx.password_override is not None else (
+            self.password.text() or self._stored_pwd)
+        remember = self.remember.isChecked()
+        if tmp.account_id and self.config.account(tmp.account_id):
+            # Credencial guardada elegida (o fijada por el LoginDialog)
+            p.account_id, p.username = tmp.account_id, tmp.username
             self.config.passwords.delete(p.id)
+        elif tmp.username and server:
+            # Usuario nuevo: se guarda como credencial del servidor para reutilizarla
+            acc = self.config.find_account(server, tmp.username) or Account(server=server, username=tmp.username)
+            acc.remember_password = remember
+            self.config.save_account(acc, pwd or None)
+            p.account_id, p.username = acc.id, acc.username
+            self.config.passwords.delete(p.id)
+        elif tmp.username:
+            # file:// u otra URL sin servidor: credencial propia del proyecto (formato anterior)
+            p.account_id, p.username, p.remember_password = "", tmp.username, remember
+            if pwd:
+                self.config.passwords.set(p.id, pwd, remember)
+        else:
+            p.account_id, p.username = "", ""
+            self.config.passwords.delete(p.id)
+        self.config.save_project(p)
         if p.url:
             self.config.remember_url(p.url)
 

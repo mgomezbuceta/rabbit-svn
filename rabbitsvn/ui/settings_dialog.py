@@ -5,9 +5,10 @@ import glob
 import os
 import shutil
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
-                               QTabWidget, QVBoxLayout, QWidget)
+                               QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+                               QSpinBox, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..config import LOG_FILE, Config, setup_logging
 from ..svn.client import SvnError
@@ -17,7 +18,7 @@ DIFF_TOOLS = ["meld", "kdiff3", "kompare", "diffuse", "bcompare", "code"]
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent, config: Config):
+    def __init__(self, parent, config: Config, tab: str = ""):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("Ajustes")
@@ -30,6 +31,10 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._svn(), "Subversion")
         tabs.addTab(self._cache(), "Caché e historial")
         tabs.addTab(self._logging(), "Registro")
+        tabs.addTab(self._credentials(), "Credenciales")
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == tab:
+                tabs.setCurrentIndex(i)
         lay.addWidget(std_buttons(self, "Guardar"))
 
     # -------------------------------------------------------------- pestañas
@@ -200,6 +205,90 @@ class SettingsDialog(QDialog):
                     pass
         QMessageBox.information(self, "Caché", f"Eliminadas {n} entradas.")
         self._check_plaintext()
+
+    def _credentials(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        info = QLabel("Credenciales guardadas por servidor. Todos los proyectos de un servidor que usan el mismo "
+                      "usuario comparten la contraseña: si la cambias aquí, cambia para todos.")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+        self.acc_table = QTreeWidget()
+        self.acc_table.setHeaderLabels(["Servidor", "Usuario", "Contraseña", "Proyectos"])
+        self.acc_table.setRootIsDecorated(False)
+        self.acc_table.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        lay.addWidget(self.acc_table)
+        row = QHBoxLayout()
+        for text, fn in (("Cambiar contraseña…", self._acc_password), ("Olvidar contraseña", self._acc_forget),
+                         ("Borrar credencial…", self._acc_delete)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch()
+        lay.addLayout(row)
+        self._acc_reload()
+        return w
+
+    def _acc_reload(self):
+        self.acc_table.clear()
+        for acc in sorted(self.config.accounts, key=lambda a: (a.server, a.username)):
+            projects = self.config.projects_using(acc.id)
+            saved = bool(self.config.passwords.get(acc.key))
+            it = QTreeWidgetItem([acc.server, acc.username,
+                                  ("guardada" if acc.remember_password else "solo esta sesión") if saved else "no",
+                                  ", ".join(p.name for p in projects) or "(ninguno)"])
+            it.setData(0, Qt.UserRole, acc.id)
+            it.setToolTip(3, "\n".join(p.name for p in projects))
+            self.acc_table.addTopLevelItem(it)
+        for c in (1, 2):
+            self.acc_table.resizeColumnToContents(c)
+
+    def _acc_selected(self):
+        it = self.acc_table.currentItem()
+        acc = self.config.account(it.data(0, Qt.UserRole)) if it else None
+        if acc is None:
+            QMessageBox.information(self, "Credenciales", "Selecciona una credencial.")
+        return acc
+
+    def _acc_password(self):
+        acc = self._acc_selected()
+        if not acc:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Cambiar contraseña")
+        form = QFormLayout(dlg)
+        form.addRow(QLabel(f"<b>{esc(acc.label)}</b>"))
+        pwd = QLineEdit()
+        pwd.setEchoMode(QLineEdit.Password)
+        form.addRow("Nueva contraseña:", pwd)
+        remember = QCheckBox("Guardar en el llavero del sistema" if self.config.passwords.persistent
+                             else "Recordar durante esta sesión")
+        remember.setChecked(acc.remember_password)
+        form.addRow("", remember)
+        form.addRow(std_buttons(dlg, "Guardar"))
+        if dlg.exec() == QDialog.Accepted and pwd.text():
+            acc.remember_password = remember.isChecked()
+            self.config.save_account(acc, pwd.text())
+            self._acc_reload()
+
+    def _acc_forget(self):
+        acc = self._acc_selected()
+        if acc and confirm(self, f"¿Olvidar la contraseña de {acc.label}? Se pedirá al conectar."):
+            acc.remember_password = False
+            self.config.save_account(acc)
+            self.config.passwords.delete(acc.key)
+            self._acc_reload()
+
+    def _acc_delete(self):
+        acc = self._acc_selected()
+        if not acc:
+            return
+        n = len(self.config.projects_using(acc.id))
+        if confirm(self, f"¿Borrar la credencial {acc.label}?" +
+                   (f"\n\n{n} proyecto(s) se quedarán sin credenciales y tendrás que elegir otras al editarlos "
+                    "o al conectar." if n else "")):
+            self.config.remove_account(acc.id)
+            self._acc_reload()
 
     def _cache(self):
         w = QWidget()

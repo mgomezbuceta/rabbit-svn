@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         client = config.client()
         self.statusBar().addPermanentWidget(QLabel(
             f"svn {client.version() if client.available() else 'NO ENCONTRADO'}  "))
+        QTimer.singleShot(0, self.migrate_credentials)
         from .update_dialog import UpdateManager
         self.updates = UpdateManager(self)
         if not client.available():
@@ -417,20 +418,65 @@ class MainWindow(QMainWindow):
             m.addAction("Copiar URL", lambda: QGuiApplication.clipboard().setText(self.ctx.project.url))
             m.addSeparator()
             m.addAction("Olvidar contraseña guardada", self.forget_password)
+            m.addAction("Gestionar credenciales…", lambda: self.open_settings(tab="Credenciales"))
             m.addAction("Quitar de la lista", self.remove_project)
         m.exec(self.projects.viewport().mapToGlobal(pos))
 
     def forget_password(self):
         p = self.ctx.project
-        if p and confirm(self, f"¿Borrar la contraseña de «{p.name}» del llavero y de la sesión?"):
+        if not p:
+            return
+        acc = self.config.account(p.account_id) if p.account_id else None
+        if acc:
+            others = len(self.config.projects_using(acc.id)) - 1
+            text = (f"¿Borrar la contraseña de {acc.label} del llavero y de la sesión?" +
+                    (f"\n\nLa usan también otros {others} proyecto(s): te la pedirá la próxima vez en todos."
+                     if others > 0 else ""))
+            if confirm(self, text):
+                acc.remember_password = False
+                self.config.save_account(acc)
+                self.config.passwords.delete(acc.key)
+                self.statusBar().showMessage("Contraseña olvidada", 4000)
+        elif confirm(self, f"¿Borrar la contraseña de «{p.name}» del llavero y de la sesión?"):
             self.config.passwords.delete(p.id)
             p.remember_password = False
             self.config.save_project(p)
             self.statusBar().showMessage("Contraseña olvidada", 4000)
 
-    def open_settings(self):
+    def migrate_credentials(self):
+        """Paso de credenciales por proyecto (≤0.2) a credenciales por servidor."""
+        try:
+            conflicts = self.config.migrate_credentials()
+        except Exception as exc:  # noqa: BLE001  (llavero bloqueado, etc.: se reintenta en el próximo arranque)
+            CommandLog.get().err(f"No se pudieron convertir las credenciales: {exc}")
+            return
+        for acc, names in conflicts:
+            self._resolve_conflict(acc, names)
+        if self.ctx.project:   # el proyecto abierto ahora apunta a su credencial
+            fresh = self.config.project(self.ctx.project.id)
+            if fresh:
+                self.ctx = Context(self.config, fresh)
+
+    def _resolve_conflict(self, acc, names):
+        from PySide6.QtWidgets import QInputDialog, QLineEdit as _LE
+        text = (f"Los proyectos {', '.join(names)} usan el usuario «{acc.username}» en {acc.server} "
+                "con contraseñas distintas.\n\nAhora se comparte una sola contraseña por servidor. "
+                "Escribe la contraseña actual (o deja el campo vacío para que se pida al conectar):")
+        pwd, ok = QInputDialog.getText(self, "Credenciales", text, _LE.Password)
+        if ok and pwd:
+            self.config.save_account(acc, pwd)
+        for p in self.config.projects_using(acc.id):
+            self.config.passwords.delete(p.id)   # se descartan las contraseñas antiguas por proyecto
+
+    def open_settings(self, tab: str = ""):
         from .settings_dialog import SettingsDialog
-        if SettingsDialog(self, self.config).exec():
+        dlg = SettingsDialog(self, self.config, tab)
+        accepted = dlg.exec()
+        if self.ctx.project:   # las credenciales pueden haber cambiado
+            fresh = self.config.project(self.ctx.project.id)
+            if fresh:
+                self.ctx = Context(self.config, fresh)
+        if accepted:
             self.show_unversioned.setChecked(self.config.get("general", "show_unversioned_files", True))
             self.refresh()
 

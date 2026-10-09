@@ -145,7 +145,9 @@ O búscalo en el menú de aplicaciones como **RabbitSVN**. Probado en **Ubuntu 2
 - **Carpeta local ya descargada**: elige la carpeta y pulsa *Leer información de la carpeta*. Se rellenan la URL, la raíz del repositorio y la revisión. Si eliges una subcarpeta, se usa la raíz de la working copy.
 - **Descargar desde repositorio (checkout)**: escribe la URL y la carpeta destino. Elige la revisión y la profundidad si lo necesitas. Pulsa *Probar conexión* antes de aceptar.
 
-Rellena el **usuario** y la **contraseña** si el servidor los pide. Marca *Guardar contraseña en el llavero* para no volver a escribirla. Solo si tu servidor usa un certificado autofirmado, marca el problema concreto en *Aceptar certificados SSL*.
+En **Credenciales**, elige *Otro usuario…* y rellena el usuario y la contraseña si el servidor los pide. Marca *Guardar contraseña en el llavero* para no volver a escribirla. Solo si tu servidor usa un certificado autofirmado, marca el problema concreto en *Aceptar certificados SSL*.
+
+Las credenciales se guardan **por servidor**. Cuando añadas otro repositorio del mismo servidor (mismo esquema, host y puerto), la app te preguntará si quieres usar el usuario que ya tienes guardado. Nunca te ofrece credenciales de otro servidor. Todos los proyectos que comparten una credencial usan la misma contraseña: si la cambias, cambia para todos.
 
 <div align="center">
 <img src="capturas/anadir-proyecto.png" alt="Añadir proyecto" width="560">
@@ -186,6 +188,7 @@ Casi todo está también en el **menú contextual** de cada fichero o carpeta, q
 - **Herramientas externas**: diff, fusión y aplicación para abrir ficheros. El botón *Detectar* busca meld, kdiff3 o kompare.
 - **Subversion**: rutas de `svn` y `svnadmin`, tiempo máximo de las consultas y gestión de la caché de credenciales de svn. Avisa si hay contraseñas guardadas en texto plano.
 - **Caché e historial** y **Registro**.
+- **Credenciales**: las credenciales guardadas por servidor y qué proyectos usan cada una. Desde aquí cambias una contraseña, la olvidas o borras la credencial.
 
 <div align="center">
 <img src="capturas/ajustes.png" alt="Ajustes" width="560">
@@ -207,6 +210,7 @@ Casi todo está también en el **menú contextual** de cada fichero o carpeta, q
   - Solo en el **llavero del sistema** (Secret Service/GNOME Keyring o KWallet). Se rechazan los backends que guardan en fichero sin cifrar.
   - Si no hay llavero, solo se recuerdan mientras la app está abierta.
   - Al editar un proyecto, la contraseña guardada no se muestra en el formulario.
+  - Una credencial solo se ofrece para proyectos de su mismo servidor (esquema, host y puerto), para que una contraseña no acabe enviada a otro sitio por error.
 - **Nada sensible en la línea de órdenes**: la contraseña va a svn por stdin (`--password-from-stdin`). Los mensajes de log van por un fichero temporal 0600, que se borra al terminar.
 - **`--no-auth-cache` por defecto**, para que svn no duplique tus credenciales en `~/.subversion`.
 - **URLs**: solo `file`, `svn`, `svn+ssh`, `http` y `https`. Las que incluyen `usuario:contraseña@` se rechazan.
@@ -231,7 +235,7 @@ Casi todo está también en el **menú contextual** de cada fichero o carpeta, q
 |---|---|
 | `~/.config/rabbit-svn/config.json` | Proyectos, ajustes e historial de URLs y mensajes. **Sin contraseñas.** |
 | `~/.config/rabbit-svn/rabbit-svn.log` | Registro (nivel configurable; rota a los 5 MB). |
-| Llavero del sistema, servicio `rabbit-svn` | Contraseñas de los proyectos que marques. |
+| Llavero del sistema, servicio `rabbit-svn` | Contraseñas de las credenciales que marques (una por servidor y usuario). |
 
 ## 🧑‍💻 Desarrollo
 
