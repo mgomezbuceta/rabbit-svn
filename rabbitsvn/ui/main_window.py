@@ -322,6 +322,7 @@ class MainWindow(QMainWindow):
             "local que ya sea una working copy o hacer checkout desde una URL.<br>"
             "También puedes arrastrar una carpeta a esta ventana.")
         self.tree.clear()
+        self.items = {}
 
     def about(self):
         QMessageBox.about(self, "Acerca de RabbitSVN",
@@ -365,6 +366,7 @@ class MainWindow(QMainWindow):
         self.config.save()
         self.setWindowTitle(f"{p.name} — RabbitSVN")
         self.tree.clear()
+        self.items = {}
         self.entries.clear()
         self.reload_project_info()
         self.refresh()
@@ -498,7 +500,13 @@ class MainWindow(QMainWindow):
         root = os.path.normpath(self._root()) if self.ctx.project else ""
         if not root:
             return
-        expanded = {it.data(0, Qt.UserRole) for it in self.items.values() if it.isExpanded()}
+        expanded = set()
+        for path, it in self.items.items():
+            try:
+                if it.isExpanded():
+                    expanded.add(path)
+            except RuntimeError:  # el elemento ya no existe (árbol vaciado)
+                pass
         selected = set(self.selected_paths(default_root=False))
         first_load = not self.items
         self.tree.setSortingEnabled(False)
