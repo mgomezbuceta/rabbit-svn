@@ -53,8 +53,11 @@ class SettingsDialog(QDialog):
         self.auto_refresh.setChecked(g("auto_refresh_on_focus"))
         self.confirm_revert = QCheckBox("Pedir confirmación antes de revertir")
         self.confirm_revert.setChecked(g("confirm_revert"))
+        self.check_updates = QCheckBox("Buscar versiones nuevas al arrancar y cada 6 horas")
+        self.check_updates.setChecked(g("check_updates"))
         for cb in (self.show_unversioned, self.show_ignored, self.recursive, self.colorize,
-                   self.highlight, self.switch_after_branch, self.auto_refresh, self.confirm_revert):
+                   self.highlight, self.switch_after_branch, self.auto_refresh, self.confirm_revert,
+                   self.check_updates):
             form.addRow(cb)
         self.datetime_format = QLineEdit(g("datetime_format"))
         self.datetime_format.setToolTip("Formato strftime de Python, p. ej. %d/%m/%Y %H:%M")
@@ -246,6 +249,7 @@ class SettingsDialog(QDialog):
         c.set("general", "switch_after_branch", self.switch_after_branch.isChecked())
         c.set("general", "auto_refresh_on_focus", self.auto_refresh.isChecked())
         c.set("general", "confirm_revert", self.confirm_revert.isChecked())
+        c.set("general", "check_updates", self.check_updates.isChecked())
         c.set("general", "datetime_format", self.datetime_format.text())
         c.set("general", "log_limit", self.log_limit.value())
         c.set("general", "default_commit_message", self.default_msg.toPlainText())

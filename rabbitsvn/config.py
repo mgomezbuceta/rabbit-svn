@@ -49,6 +49,8 @@ DEFAULTS = {
         "log_limit": 100,
         "auto_refresh_on_focus": True,
         "confirm_revert": True,
+        "check_updates": True,
+        "skip_version": "",
     },
     "external": {
         "diff_tool": "/usr/bin/meld" if os.path.exists("/usr/bin/meld") else "",

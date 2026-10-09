@@ -83,6 +83,8 @@ class MainWindow(QMainWindow):
         client = config.client()
         self.statusBar().addPermanentWidget(QLabel(
             f"svn {client.version() if client.available() else 'NO ENCONTRADO'}  "))
+        from .update_dialog import UpdateManager
+        self.updates = UpdateManager(self)
         if not client.available():
             QTimer.singleShot(300, lambda: QMessageBox.critical(
                 self, "Subversion", "No se encuentra el binario 'svn'.\nInstálalo (sudo apt install subversion) "
@@ -260,6 +262,8 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_settings)
 
         m = mb.addMenu("A&yuda")
+        m.addAction(self._act("Buscar actualizaciones…", lambda: self.updates.check(manual=True)))
+        m.addSeparator()
         m.addAction(self._act("Acerca de", self.about))
 
     # ================================================================== estado UI

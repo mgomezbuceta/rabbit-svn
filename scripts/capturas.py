@@ -131,6 +131,7 @@ def main():
     cfg = Config()
     cfg.set("external", "diff_tool", "")   # visor interno en las capturas
     cfg.set("general", "auto_refresh_on_focus", False)
+    cfg.set("general", "check_updates", False)
     for name in ("intranet", "api-facturacion"):
         os.makedirs(os.path.join(WORK, name), exist_ok=True)
         cfg.save_project(Project(name=name, wc_path=os.path.join(WORK, name)))

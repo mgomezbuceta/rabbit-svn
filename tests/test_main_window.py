@@ -42,6 +42,7 @@ def test_cambiar_de_proyecto_lista_ficheros(tmp_path, monkeypatch):
     cfg.save_project(pa)
     cfg.save_project(pb)
     cfg.set("general", "auto_refresh_on_focus", False)
+    cfg.set("general", "check_updates", False)
     win = mw.MainWindow(cfg)
 
     def wait_for(cond, secs=15):

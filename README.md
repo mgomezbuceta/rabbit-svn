@@ -77,13 +77,26 @@ RabbitSVN no guarda copia de tus datos: todo lo que ves sale de tu working copy 
 
 ```bash
 sha256sum -c SHA256SUMS.txt                      # opcional: comprobar la descarga
-sudo apt install ./rabbit-svn_0.1.0_amd64.deb
+sudo apt install ./rabbit-svn_<versión>_amd64.deb
 ```
 
 `apt` instala también `subversion` y el resto de dependencias. Después búscala en el menú de aplicaciones como **RabbitSVN**, o escribe `rabbit-svn` en una terminal.
 
-- **Actualizar**: instala el `.deb` nuevo encima. Tu configuración y tus proyectos se conservan.
+- **Actualizar**: desde la 0.2.0 la app se actualiza sola (ver abajo). También puedes instalar el `.deb` nuevo encima: tu configuración y tus proyectos se conservan.
 - **Desinstalar**: `sudo apt remove rabbit-svn`. Tus proyectos y ajustes de `~/.config/rabbit-svn` no se borran.
+
+### 🔄 Actualizaciones automáticas
+
+Con el paquete `.deb` instalado, RabbitSVN consulta la última release de GitHub al arrancar y cada 6 horas. Si hay una versión nueva, muestra sus notas y un botón **Instalar ahora**:
+
+1. Descarga el `.deb` de la release.
+2. Comprueba su SHA-256 contra `SHA256SUMS.txt` y contra el digest que publica GitHub, y que el paquete sea `rabbit-svn` con la versión anunciada. Si algo no cuadra, no instala nada.
+3. Lo instala con `apt` mediante `pkexec`, que te pide la contraseña con el diálogo del sistema.
+4. Te ofrece reiniciar la aplicación.
+
+También puedes elegir *Más tarde* u *Omitir esta versión*, buscar a mano en *Ayuda → Buscar actualizaciones* o desactivarlo en *Ajustes → General*. La comprobación solo hace una petición a la API de GitHub y no envía ningún dato tuyo. Si instalaste desde el código fuente, la app solo te avisa: actualiza con `git pull && ./install.sh`.
+
+> La versión 0.1.x no incluye el actualizador: instala la 0.2.0 a mano una vez y, a partir de ahí, se actualizará sola.
 
 ### 🛠️ Desde el código fuente
 
@@ -241,6 +254,7 @@ packaging/build-deb.sh                    # genera instaladores/rabbit-svn_<vers
 rabbitsvn/svn/   cliente de Subversion (órdenes, validación y lectura del XML)
 rabbitsvn/ui/    ventana principal y diálogos (PySide6)
 rabbitsvn/config.py  configuración, proyectos y llavero
+rabbitsvn/updater.py búsqueda, descarga verificada e instalación de versiones nuevas
 packaging/       icono, entrada de menú y generación del .deb
 scripts/         utilidades (capturas del README)
 tests/           tests contra repositorios file:// temporales
